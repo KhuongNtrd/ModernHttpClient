@@ -1,3 +1,9 @@
+using Android.OS;
+using Java.IO;
+using Java.Security;
+using Java.Util.Concurrent;
+using Javax.Net.Ssl;
+using Square.OkHttp3;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -9,14 +15,6 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
-using Android.OS;
-using Android.Security;
-using Java.IO;
-using Java.Net;
-using Java.Security;
-using Java.Util.Concurrent;
-using Javax.Net.Ssl;
-using Square.OkHttp3;
 
 namespace ModernHttpClient
 {
@@ -34,108 +32,55 @@ namespace ModernHttpClient
             };
 
         public bool DisableCaching { get; set; }
-
         public TimeSpan? Timeout { get; set; }
 
-        public readonly CertificatePinner CertificatePinner;
+        private readonly CertificatePinner.Builder CertificatePinnerBuilder;
 
         private IKeyManager[] KeyManagers;
 
-        public readonly TLSConfig TLSConfig;
-
-        public readonly string PinningMode = "CertificateOnly";
-
-        public NativeMessageHandler() : this(false, new TLSConfig()) { }
-
-        public NativeMessageHandler(bool throwOnCaptiveNetwork, TLSConfig tLSConfig, NativeCookieHandler cookieHandler = null, IWebProxy proxy = null)
+        public NativeMessageHandler(bool throwOnCaptiveNetwork, CustomSSLVerification customSSLVerification, NativeCookieHandler cookieHandler = null)
         {
             this.throwOnCaptiveNetwork = throwOnCaptiveNetwork;
 
             var clientBuilder = client.NewBuilder();
 
-            this.TLSConfig = tLSConfig;
+            var specsBuilder = new ConnectionSpec.Builder(ConnectionSpec.ModernTls).TlsVersions(TlsVersion.Tls12);
+            var specs = specsBuilder.Build();
 
-            var tlsSpecBuilder = new ConnectionSpec.Builder(ConnectionSpec.ModernTls).TlsVersions(new[] { TlsVersion.Tls12, TlsVersion.Tls13 });
-            var tlsSpec = tlsSpecBuilder.Build();
-
-            var specs = new List<ConnectionSpec>() { tlsSpec };
-
-            if (Build.VERSION.SdkInt < BuildVersionCodes.Lollipop || NetworkSecurityPolicy.Instance.IsCleartextTrafficPermitted)
+            clientBuilder.ConnectionSpecs(new List<ConnectionSpec>() { specs });
+            clientBuilder.Protocols(new[] { Protocol.Http11 }); // Required to avoid stream was reset: PROTOCOL_ERROR 
+            if (customSSLVerification != null)
             {
-                specs.Add(ConnectionSpec.Cleartext);
-            }
+                clientBuilder.HostnameVerifier(new HostnameVerifier(customSSLVerification.Pins));
 
-            clientBuilder.ConnectionSpecs(specs);
-            clientBuilder.Protocols(new[] { Protocol.Http11 }); // Required to avoid stream was reset: PROTOCOL_ERROR
+                this.CertificatePinnerBuilder = new CertificatePinner.Builder();
 
-            // Add Certificate Pins
-            if (!TLSConfig.DangerousAcceptAnyServerCertificateValidator &&
-                TLSConfig.Pins != null &&
-                TLSConfig.Pins.Count > 0 &&
-                TLSConfig.Pins.FirstOrDefault(p => p.PublicKeys.Count() > 0) != null)
-            {
-                this.PinningMode = "PublicKeysOnly";
-
-                this.CertificatePinner = new CertificatePinner();
-
-                foreach (var pin in TLSConfig.Pins)
+                // Add Certificate Pins
+                foreach (var pin in customSSLVerification.Pins)
                 {
-                    this.CertificatePinner.AddPins(pin.Hostname, pin.PublicKeys);
+                    this.CertificatePinnerBuilder.Add(pin.Hostname, pin.PublicKeys);
                 }
 
-                clientBuilder.CertificatePinner(CertificatePinner.Build());
+                clientBuilder.CertificatePinner(CertificatePinnerBuilder.Build());
+
+                // Set client credentials
+                SetClientCertificate(customSSLVerification.ClientCertificate);
             }
-
-            // Set client credentials
-            SetClientCertificate(TLSConfig.ClientCertificate);
-
-            if (cookieHandler != null) clientBuilder.CookieJar(cookieHandler);
-
-            // Adding proxy support
-            if (proxy != null && proxy is WebProxy)
+            // Set SslSocketFactory
+            if (Build.VERSION.SdkInt < BuildVersionCodes.Lollipop)
             {
-                var webProxy = proxy as WebProxy;
-
-                var type = Java.Net.Proxy.Type.Http;
-                var address = new InetSocketAddress(webProxy.Address.Host, webProxy.Address.Port);
-                var jProxy = new Proxy(type, address);
-                clientBuilder.Proxy(jProxy);
-
-                if (webProxy.Credentials != null)
-                {
-                    var credentials = (NetworkCredential)webProxy.Credentials;
-                    clientBuilder.ProxyAuthenticator(new ProxyAuthenticator(credentials.UserName, credentials.Password));
-                }
-            }
-
-            var sslContext = SSLContext.GetInstance("TLS");
-
-            // Support self-signed certificates
-            if (TLSConfig.DangerousAcceptAnyServerCertificateValidator)
-            {
-                // Install the all-trusting trust manager
-                var trustManager = new CustomX509TrustManager();
-                sslContext.Init(KeyManagers, new ITrustManager[] { trustManager }, new SecureRandom());
-                // Create an ssl socket factory with our all-trusting manager
-                var sslSocketFactory = sslContext.SocketFactory;
-                clientBuilder.SslSocketFactory(sslSocketFactory, trustManager);
+                // Support TLS1.2 on Android versions before Lollipop
+                clientBuilder.SslSocketFactory(new TlsSslSocketFactory(KeyManagers, null), TlsSslSocketFactory.GetSystemDefaultTrustManager());
             }
             else
             {
-                // Set SslSocketFactory
-                if (Build.VERSION.SdkInt < BuildVersionCodes.Lollipop)
-                {
-                    // Support TLS1.2 on Android versions before Lollipop
-                    clientBuilder.SslSocketFactory(new TlsSslSocketFactory(), TlsSslSocketFactory.GetSystemDefaultTrustManager());
-                }
-                else
-                {
-                    sslContext.Init(KeyManagers, null, null);
-                    clientBuilder.SslSocketFactory(sslContext.SocketFactory, TlsSslSocketFactory.GetSystemDefaultTrustManager());
-                }
+                var sslContext = SSLContext.GetInstance("TLS");
+                sslContext.Init(KeyManagers, null, null);
+                clientBuilder.SslSocketFactory(sslContext.SocketFactory, TlsSslSocketFactory.GetSystemDefaultTrustManager());
             }
 
-            clientBuilder.HostnameVerifier(new HostnameVerifier(this));
+            if (cookieHandler != null) clientBuilder.CookieJar(cookieHandler);
+
             client = clientBuilder.Build();
         }
 
@@ -143,16 +88,7 @@ namespace ModernHttpClient
         {
             if (certificate == null) return;
 
-            byte[] bytes;
-
-            try
-            {
-                bytes = Convert.FromBase64String(certificate.RawData);
-            }
-            catch (Exception ex)
-            {
-                throw new HttpRequestException(FailureMessages.InvalidRawData, ex);
-            }
+            var bytes = Convert.FromBase64String(certificate.RawData);
 
             var stream = new System.IO.MemoryStream(bytes);
             var keyStore = KeyStore.GetInstance("PKCS12");
@@ -206,6 +142,18 @@ namespace ModernHttpClient
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            var clientBuilder = client.NewBuilder();
+
+            if (Timeout != null)
+            {
+                var timeout = (long)Timeout.Value.TotalMilliseconds;
+                clientBuilder.ConnectTimeout(timeout, TimeUnit.Milliseconds);
+                clientBuilder.WriteTimeout(timeout, TimeUnit.Milliseconds);
+                clientBuilder.ReadTimeout(timeout, TimeUnit.Milliseconds);
+            }
+
+            client = clientBuilder.Build();
+
             var java_uri = request.RequestUri.GetComponents(UriComponents.AbsoluteUri, UriFormat.UriEscaped);
             var url = new Java.Net.URL(java_uri);
 
@@ -217,7 +165,7 @@ namespace ModernHttpClient
                 var contentType = "text/plain";
                 if (request.Content.Headers.ContentType != null)
                 {
-                    contentType = string.Join(" ", request.Content.Headers.GetValues("Content-Type"));
+                    contentType = String.Join(" ", request.Content.Headers.GetValues("Content-Type"));
                 }
                 body = RequestBody.Create(MediaType.Parse(contentType), bytes);
             }
@@ -235,7 +183,7 @@ namespace ModernHttpClient
                 .Union(request.Content != null ?
                     request.Content.Headers :
                     Enumerable.Empty<KeyValuePair<string, IEnumerable<string>>>());
-            
+
             // Add Cookie Header if there's any cookie for the domain in the cookie jar
             var stringBuilder = new StringBuilder();
 
@@ -248,7 +196,7 @@ namespace ModernHttpClient
                     stringBuilder.Append(cookie.Name() + "=" + cookie.Value() + ";");
                 }
             }
-                
+
             foreach (var kvp in keyValuePairs)
             {
                 if (kvp.Key == "Cookie")
@@ -265,16 +213,6 @@ namespace ModernHttpClient
             if (stringBuilder.Length > 0)
             {
                 requestBuilder.AddHeader("Cookie", stringBuilder.ToString().TrimEnd(';'));
-            }
-
-            if (Timeout != null)
-            {
-                var clientBuilder = client.NewBuilder();
-                var timeout = (long)Timeout.Value.TotalSeconds;
-                clientBuilder.ConnectTimeout(timeout, TimeUnit.Seconds);
-                clientBuilder.WriteTimeout(timeout, TimeUnit.Seconds);
-                clientBuilder.ReadTimeout(timeout, TimeUnit.Seconds);
-                client = clientBuilder.Build();
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -407,11 +345,11 @@ namespace ModernHttpClient
 
         public static string PinningFailureMessage = null;
 
-        NativeMessageHandler nativeHandler { get; set; }
+        private readonly List<Pin> Pins;
 
-        public HostnameVerifier(NativeMessageHandler handler)
+        public HostnameVerifier(List<Pin> pins)
         {
-            this.nativeHandler = handler;
+            this.Pins = pins;
         }
 
         /// <summary>
@@ -425,105 +363,66 @@ namespace ModernHttpClient
         {
             var errors = SslPolicyErrors.None;
 
-            if (nativeHandler.TLSConfig.DangerousAcceptAnyServerCertificateValidator)
-            {
+            // Convert java certificates to .NET certificates and build cert chain from root certificate
+            /*var serverCertChain = session.GetPeerCertificateChain();
+            var chain = new X509Chain();
+            X509Certificate2 root = null;
+            var errors = SslPolicyErrors.None;
+
+            // Build certificate chain and check for errors
+            if (serverCertChain == null || serverCertChain.Length == 0)
+            {//no cert at all
+                errors = SslPolicyErrors.RemoteCertificateNotAvailable;
+                PinningFailureMessage = FailureMessages.NoCertAtAll;
                 goto sslErrorVerify;
             }
 
-            // Convert java certificates to .NET certificates and build cert chain from root certificate
-            var serverCertChain = session.GetPeerCertificateChain();
-
-            var netCerts = serverCertChain.Select(x => new X509Certificate2(x.GetEncoded())).ToList();
-
-            switch (nativeHandler.PinningMode)
-            {
-                case "CertificateOnly":
-                    
-                    var chain = new X509Chain();
-                    X509Certificate2 root = null;
-
-                    // Build certificate chain and check for errors
-                    if (serverCertChain == null || serverCertChain.Length == 0)
-                    {//no cert at all
-                        errors = SslPolicyErrors.RemoteCertificateNotAvailable;
-                        PinningFailureMessage = FailureMessages.NoCertAtAll;
-                        goto sslErrorVerify;
-                    }
-
-                    if (serverCertChain.Length == 1)
-                    {//no root?
-                        errors = SslPolicyErrors.RemoteCertificateChainErrors;
-                        PinningFailureMessage = FailureMessages.NoRoot;
-                        goto sslErrorVerify;
-                    }
-
-                    for (int i = 1; i < netCerts.Count; i++)
-                    {
-                        chain.ChainPolicy.ExtraStore.Add(netCerts[i]);
-                    }
-
-                    chain.ChainPolicy.RevocationFlag = X509RevocationFlag.EntireChain;
-                    chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-                    chain.ChainPolicy.UrlRetrievalTimeout = new TimeSpan(0, 1, 0);
-                    chain.ChainPolicy.VerificationFlags = X509VerificationFlags.AllowUnknownCertificateAuthority;
-
-                    root = netCerts[0];
-
-                    if (!chain.Build(root))
-                    {
-                        errors = SslPolicyErrors.RemoteCertificateChainErrors;
-                        PinningFailureMessage = FailureMessages.ChainError;
-                        goto sslErrorVerify;
-                    }
-
-                    var subject = root.Subject;
-                    var subjectCn = cnRegex.Match(subject).Groups[1].Value;
-
-                    if (string.IsNullOrWhiteSpace(subjectCn) || !Utility.MatchHostnameToPattern(hostname, subjectCn))
-                    {
-                        var subjectAn = root.ParseSubjectAlternativeName();
-
-                        if (subjectAn.FirstOrDefault(s => Utility.MatchHostnameToPattern(hostname, s)) == null)
-                        {
-                            errors = SslPolicyErrors.RemoteCertificateNameMismatch;
-                            PinningFailureMessage = FailureMessages.SubjectNameMismatch;
-                            goto sslErrorVerify;
-                        }
-                    }
-                    break;
-                case "PublicKeysOnly":
-
-                    if (nativeHandler.CertificatePinner != null)
-                    {
-                        if (!nativeHandler.CertificatePinner.HasPins(hostname))
-                        {
-                            errors = SslPolicyErrors.RemoteCertificateNameMismatch;
-                            PinningFailureMessage = FailureMessages.NoPinsProvided + " " + hostname;
-                        }
-
-                        // CertificatePinner.Check will be done by Square.OkHttp3.CertificatePinner
-                    }
-                    break;
+            if (serverCertChain.Length == 1)
+            {//no root?
+                errors = SslPolicyErrors.RemoteCertificateChainErrors;
+                PinningFailureMessage = FailureMessages.NoRoot;
+                goto sslErrorVerify;
             }
 
-        sslErrorVerify:
+            var netCerts = serverCertChain.Select(x => new X509Certificate2(x.GetEncoded())).ToArray();
+
+            for (int i = 1; i < netCerts.Length; i++)
+            {
+                chain.ChainPolicy.ExtraStore.Add(netCerts[i]);
+            }
+
+            root = netCerts[0];
+
+            chain.ChainPolicy.RevocationFlag = X509RevocationFlag.EntireChain;
+            chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+            chain.ChainPolicy.UrlRetrievalTimeout = new TimeSpan(0, 1, 0);
+            chain.ChainPolicy.VerificationFlags = X509VerificationFlags.AllowUnknownCertificateAuthority;
+
+            if (!chain.Build(root))
+            {
+                errors = SslPolicyErrors.RemoteCertificateChainErrors;
+                PinningFailureMessage = FailureMessages.ChainError;
+                goto sslErrorVerify;
+            }
+
+            var subject = root.Subject;
+            var subjectCn = cnRegex.Match(subject).Groups[1].Value;
+
+            if (string.IsNullOrWhiteSpace(subjectCn) || !Utility.MatchHostnameToPattern(hostname, subjectCn))
+            {
+                errors = SslPolicyErrors.RemoteCertificateNameMismatch;
+                PinningFailureMessage = FailureMessages.SubjectNameMismatch;
+                goto sslErrorVerify;
+            }*/
+
+            if (Pins.FirstOrDefault((pin) => pin.Hostname == hostname) == null)
+            {
+                errors = SslPolicyErrors.RemoteCertificateNameMismatch;
+                PinningFailureMessage = FailureMessages.NoPinsProvided + " " + hostname;
+            }
+
+            //sslErrorVerify:
             return errors == SslPolicyErrors.None;
-        }
-    }
-
-    class CustomX509TrustManager : Java.Lang.Object, IX509TrustManager
-    {
-        public void CheckClientTrusted(Java.Security.Cert.X509Certificate[] chain, string authType)
-        {
-        }
-
-        public void CheckServerTrusted(Java.Security.Cert.X509Certificate[] chain, string authType)
-        {
-        }
-
-        Java.Security.Cert.X509Certificate[] IX509TrustManager.GetAcceptedIssuers()
-        {
-            return new Java.Security.Cert.X509Certificate[0];
         }
     }
 }

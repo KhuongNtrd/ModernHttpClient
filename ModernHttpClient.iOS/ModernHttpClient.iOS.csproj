@@ -1,5 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Import Project="..\..\..\Locator\packages\Xamarin.Forms.4.0.0.425677\build\Xamarin.Forms.props" Condition="Exists('..\..\..\Locator\packages\Xamarin.Forms.4.0.0.425677\build\Xamarin.Forms.props')" />
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
@@ -12,6 +13,8 @@
     <RootNamespace>ModernHttpClient</RootNamespace>
     <IPhoneResourcePrefix>Resources</IPhoneResourcePrefix>
     <AssemblyName>ModernHttpClient</AssemblyName>
+    <NuGetPackageImportStamp>
+    </NuGetPackageImportStamp>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -32,14 +35,14 @@
     <ConsolePause>false</ConsolePause>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="BouncyCastle.Crypto, Version=1.8.5.0, Culture=neutral, PublicKeyToken=0e99375e54769942">
+      <HintPath>..\..\..\Locator\packages\BouncyCastle.1.8.5\lib\BouncyCastle.Crypto.dll</HintPath>
+    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Xml" />
     <Reference Include="System.Core" />
     <Reference Include="Xamarin.iOS" />
     <Reference Include="System.Net.Http" />
-    <Reference Include="BouncyCastle.Crypto">
-      <HintPath>..\packages\Portable.BouncyCastle.1.8.5\lib\netstandard2.0\BouncyCastle.Crypto.dll</HintPath>
-    </Reference>
   </ItemGroup>
   <ItemGroup>
     <Folder Include="Resources\" />
@@ -57,23 +60,28 @@
     <Compile Include="..\ModernHttpClient\ProgressStreamContent.cs">
       <Link>ProgressStreamContent.cs</Link>
     </Compile>
+    <Compile Include="..\ModernHttpClient\Utility.cs">
+      <Link>Utility.cs</Link>
+    </Compile>
     <Compile Include="CertificatePinner.cs" />
     <Compile Include="SpkiFingerprint.cs" />
+    <Compile Include="..\ModernHttpClient\CustomSSLVerification.cs">
+      <Link>CustomSSLVerification.cs</Link>
+    </Compile>
     <Compile Include="..\ModernHttpClient\FailureMessages.cs">
       <Link>FailureMessages.cs</Link>
-    </Compile>
-    <Compile Include="..\ModernHttpClient.Android\X509Certificate2Extension.cs">
-      <Link>X509Certificate2Extension.cs</Link>
-    </Compile>
-    <Compile Include="..\ModernHttpClient\TLSConfig.cs">
-      <Link>TLSConfig.cs</Link>
-    </Compile>
-    <Compile Include="..\ModernHttpClient.Android\Utility.cs">
-      <Link>Utility.cs</Link>
     </Compile>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\Xamarin\iOS\Xamarin.iOS.CSharp.targets" />
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('..\..\..\Locator\packages\Xamarin.Forms.4.0.0.425677\build\Xamarin.Forms.props')" Text="$([System.String]::Format('$(ErrorText)', '..\..\..\Locator\packages\Xamarin.Forms.4.0.0.425677\build\Xamarin.Forms.props'))" />
+    <Error Condition="!Exists('..\..\..\Locator\packages\Xamarin.Forms.4.0.0.425677\build\Xamarin.Forms.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\..\Locator\packages\Xamarin.Forms.4.0.0.425677\build\Xamarin.Forms.targets'))" />
+  </Target>
+  <Import Project="..\..\..\Locator\packages\Xamarin.Forms.4.0.0.425677\build\Xamarin.Forms.targets" Condition="Exists('..\..\..\Locator\packages\Xamarin.Forms.4.0.0.425677\build\Xamarin.Forms.targets')" />
 </Project>
