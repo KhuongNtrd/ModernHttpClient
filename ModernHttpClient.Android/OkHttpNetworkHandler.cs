@@ -49,22 +49,23 @@ namespace ModernHttpClient
 
             clientBuilder.ConnectionSpecs(new List<ConnectionSpec>() { specs });
             clientBuilder.Protocols(new[] { Protocol.Http11 }); // Required to avoid stream was reset: PROTOCOL_ERROR 
-
-            clientBuilder.HostnameVerifier(new HostnameVerifier(customSSLVerification.Pins));
-
-            this.CertificatePinnerBuilder = new CertificatePinner.Builder();
-
-            // Add Certificate Pins
-            foreach (var pin in customSSLVerification.Pins)
+            if (customSSLVerification != null)
             {
-                this.CertificatePinnerBuilder.Add(pin.Hostname, pin.PublicKeys);
+                clientBuilder.HostnameVerifier(new HostnameVerifier(customSSLVerification.Pins));
+
+                this.CertificatePinnerBuilder = new CertificatePinner.Builder();
+
+                // Add Certificate Pins
+                foreach (var pin in customSSLVerification.Pins)
+                {
+                    this.CertificatePinnerBuilder.Add(pin.Hostname, pin.PublicKeys);
+                }
+
+                clientBuilder.CertificatePinner(CertificatePinnerBuilder.Build());
+
+                // Set client credentials
+                SetClientCertificate(customSSLVerification.ClientCertificate);
             }
-
-            clientBuilder.CertificatePinner(CertificatePinnerBuilder.Build());
-
-            // Set client credentials
-            SetClientCertificate(customSSLVerification.ClientCertificate);
-
             // Set SslSocketFactory
             if (Build.VERSION.SdkInt < BuildVersionCodes.Lollipop)
             {
@@ -182,7 +183,7 @@ namespace ModernHttpClient
                 .Union(request.Content != null ?
                     request.Content.Headers :
                     Enumerable.Empty<KeyValuePair<string, IEnumerable<string>>>());
-            
+
             // Add Cookie Header if there's any cookie for the domain in the cookie jar
             var stringBuilder = new StringBuilder();
 
@@ -195,7 +196,7 @@ namespace ModernHttpClient
                     stringBuilder.Append(cookie.Name() + "=" + cookie.Value() + ";");
                 }
             }
-                
+
             foreach (var kvp in keyValuePairs)
             {
                 if (kvp.Key == "Cookie")
@@ -420,7 +421,7 @@ namespace ModernHttpClient
                 PinningFailureMessage = FailureMessages.NoPinsProvided + " " + hostname;
             }
 
-        //sslErrorVerify:
+            //sslErrorVerify:
             return errors == SslPolicyErrors.None;
         }
     }
