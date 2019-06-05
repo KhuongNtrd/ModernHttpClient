@@ -37,6 +37,7 @@
   <ItemGroup>
     <Reference Include="BouncyCastle.Crypto, Version=1.8.5.0, Culture=neutral, PublicKeyToken=0e99375e54769942">
       <HintPath>..\..\..\Locator\packages\BouncyCastle.1.8.5\lib\BouncyCastle.Crypto.dll</HintPath>
+      <Private>True</Private>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Xml" />
@@ -76,12 +77,4 @@
     <None Include="packages.config" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath)\Xamarin\iOS\Xamarin.iOS.CSharp.targets" />
-  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
-    <PropertyGroup>
-      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
-    </PropertyGroup>
-    <Error Condition="!Exists('..\..\..\Locator\packages\Xamarin.Forms.4.0.0.425677\build\Xamarin.Forms.props')" Text="$([System.String]::Format('$(ErrorText)', '..\..\..\Locator\packages\Xamarin.Forms.4.0.0.425677\build\Xamarin.Forms.props'))" />
-    <Error Condition="!Exists('..\..\..\Locator\packages\Xamarin.Forms.4.0.0.425677\build\Xamarin.Forms.targets')" Text="$([System.String]::Format('$(ErrorText)', '..\..\..\Locator\packages\Xamarin.Forms.4.0.0.425677\build\Xamarin.Forms.targets'))" />
-  </Target>
-  <Import Project="..\..\..\Locator\packages\Xamarin.Forms.4.0.0.425677\build\Xamarin.Forms.targets" Condition="Exists('..\..\..\Locator\packages\Xamarin.Forms.4.0.0.425677\build\Xamarin.Forms.targets')" />
 </Project>

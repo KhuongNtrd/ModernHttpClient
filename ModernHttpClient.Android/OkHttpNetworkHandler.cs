@@ -44,10 +44,15 @@ namespace ModernHttpClient
 
             var clientBuilder = client.NewBuilder();
 
-            var specsBuilder = new ConnectionSpec.Builder(ConnectionSpec.ModernTls).TlsVersions(TlsVersion.Tls12);
-            var specs = specsBuilder.Build();
+            var specsBuilder = new ConnectionSpec.Builder(ConnectionSpec.ModernTls)
+                .TlsVersions(TlsVersion.Tls12);
 
+            var specs = specsBuilder.Build();
+#if DEBUG
+            clientBuilder.ConnectionSpecs(new List<ConnectionSpec>() { specs, ConnectionSpec.Cleartext });
+#else
             clientBuilder.ConnectionSpecs(new List<ConnectionSpec>() { specs });
+#endif
             clientBuilder.Protocols(new[] { Protocol.Http11 }); // Required to avoid stream was reset: PROTOCOL_ERROR 
             if (customSSLVerification != null)
             {
