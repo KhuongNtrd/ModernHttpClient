@@ -38,7 +38,7 @@ namespace ModernHttpClient
 
         private IKeyManager[] KeyManagers;
 
-        public NativeMessageHandler(bool throwOnCaptiveNetwork, CustomSSLVerification customSSLVerification, NativeCookieHandler cookieHandler = null)
+        public NativeMessageHandler(bool throwOnCaptiveNetwork, bool sslVerification, CustomSSLVerification customSSLVerification = null, NativeCookieHandler cookieHandler = null)
         {
             this.throwOnCaptiveNetwork = throwOnCaptiveNetwork;
 
@@ -48,11 +48,12 @@ namespace ModernHttpClient
                 .TlsVersions(TlsVersion.Tls12);
 
             var specs = specsBuilder.Build();
-#if DEBUG
-            clientBuilder.ConnectionSpecs(new List<ConnectionSpec>() { specs, ConnectionSpec.Cleartext });
-#else
-            clientBuilder.ConnectionSpecs(new List<ConnectionSpec>() { specs });
-#endif
+			
+			if(!sslVerification)
+				clientBuilder.ConnectionSpecs(new List<ConnectionSpec>() { specs, ConnectionSpec.Cleartext });
+			else
+				clientBuilder.ConnectionSpecs(new List<ConnectionSpec>() { specs });
+
             clientBuilder.Protocols(new[] { Protocol.Http11 }); // Required to avoid stream was reset: PROTOCOL_ERROR 
             if (customSSLVerification != null)
             {
