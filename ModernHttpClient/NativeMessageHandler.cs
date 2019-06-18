@@ -1,6 +1,10 @@
 ﻿using System;
-using System.Net;
+using System.Collections.Generic;
 using System.Net.Http;
+using System.Threading.Tasks;
+using System.Threading;
+using System.IO;
+using System.Net;
 
 namespace ModernHttpClient
 {
@@ -9,6 +13,8 @@ namespace ModernHttpClient
     public class NativeMessageHandler : HttpClientHandler
     {
         const string wrongVersion = "You're referencing the Portable version in your App - you need to reference the platform (iOS/Android/Windows) version";
+
+        public bool DisableCaching { get; set; }
 
         /// <summary>
         /// Initializes a new instance of the <see
@@ -26,14 +32,15 @@ namespace ModernHttpClient
         /// captive network (ie: a captive network is usually a wifi network
         /// where an authentication html form is shown instead of the real
         /// content).</param>
-        /// <param name="sSLConfig">To enable TLS Mutual Authentication</param>
+        /// <param name="customSSLVerification">Enable custom SSL certificate 
+        /// verification via ServicePointManager. Disabled by default for 
+        /// performance reasons (i.e. the OS default certificate verification 
+        /// will take place)</param>
         /// <param name="cookieHandler">Enable native cookie handling.
         /// </param>
-        public NativeMessageHandler(bool throwOnCaptiveNetwork, TLSConfig tLSConfig, NativeCookieHandler cookieHandler = null, IWebProxy proxy = null) : base()
+        public NativeMessageHandler(bool throwOnCaptiveNetwork, bool sslVerification, CustomSSLVerification customSSLVerification = null, NativeCookieHandler cookieHandler = null) : base()
         {
         }
-
-        public bool DisableCaching { get; set; }
 
         public TimeSpan? Timeout
         {
