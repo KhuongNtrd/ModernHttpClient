@@ -52,7 +52,7 @@ namespace ModernHttpClient
 
         private NSUrlCredential UrlCredential;
 
-        public NativeMessageHandler(bool throwOnCaptiveNetwork, CustomSSLVerification customSSLVerification, NativeCookieHandler cookieHandler = null)
+        public NativeMessageHandler(bool throwOnCaptiveNetwork, bool sslVerification, CustomSSLVerification customSSLVerification = null, NativeCookieHandler cookieHandler = null): base()
         {
             this.throwOnCaptiveNetwork = throwOnCaptiveNetwork;
 
@@ -65,16 +65,18 @@ namespace ModernHttpClient
 
             this.CertificatePinner = new CertificatePinner();
 
-            foreach (var pin in customSSLVerification.Pins)
+            if(customSSLVerification != null)
             {
-                this.CertificatePinner.AddPins(pin.Hostname, pin.PublicKeys);
+                foreach (var pin in customSSLVerification.Pins)
+                {
+                    this.CertificatePinner.AddPins(pin.Hostname, pin.PublicKeys);
+                }
+
+                SetClientCertificate(customSSLVerification.ClientCertificate);
             }
-
-            SetClientCertificate(customSSLVerification.ClientCertificate);
-
+                    
             var urlSessionDelegate = new DataTaskDelegate(this);
             session = NSUrlSession.FromConfiguration(configuration, (INSUrlSessionDelegate)urlSessionDelegate, null);
-
             // NSUrlSessionConfiguration.DefaultSessionConfiguration uses the default NSHttpCookieStorage.SharedStorage
         }
 
