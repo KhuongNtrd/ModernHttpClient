@@ -1,6 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Import Project="..\..\..\Locator\packages\Xamarin.Forms.4.0.0.425677\build\Xamarin.Forms.props" Condition="Exists('..\..\..\Locator\packages\Xamarin.Forms.4.0.0.425677\build\Xamarin.Forms.props')" />
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
@@ -8,7 +7,6 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{1D3EBCC3-60E2-4740-9EFF-5049F4F75F2A}</ProjectGuid>
     <ProjectTypeGuids>{FEACFBD2-3405-455C-9665-78FE426C6842};{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}</ProjectTypeGuids>
-    <TemplateGuid>{a52b8a63-bc84-4b47-910d-692533484892}</TemplateGuid>
     <OutputType>Library</OutputType>
     <RootNamespace>ModernHttpClient</RootNamespace>
     <IPhoneResourcePrefix>Resources</IPhoneResourcePrefix>
