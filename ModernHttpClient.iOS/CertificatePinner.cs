@@ -2,8 +2,12 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+<<<<<<< HEAD
 using System.Net.Http;
 using System.Security.Cryptography.X509Certificates;
+=======
+using System.Text.RegularExpressions;
+>>>>>>> update pin check
 
 namespace ModernHttpClient
 {
@@ -18,6 +22,7 @@ namespace ModernHttpClient
 
         public bool HasPins(string hostname)
         {
+<<<<<<< HEAD
             foreach(var pin in Pins)
             {
                 if (Utility.MatchHostnameToPattern(hostname, pin.Key))
@@ -27,6 +32,9 @@ namespace ModernHttpClient
             }
 
             return false;
+=======
+            return Pins.Keys.Any(x => MatchDomain(x, hostname));
+>>>>>>> update pin check
         }
 
         public void AddPins(string hostname, string[] pins)
@@ -46,7 +54,7 @@ namespace ModernHttpClient
             hostname = Pins.FirstOrDefault(p => Utility.MatchHostnameToPattern(hostname, p.Key)).Key;
 
             // Get pins
-            string[] pins = Pins[hostname];
+            string[] pins = Pins.First(x => MatchDomain(x.Key, hostname)).Value;
 
             // Skip pinning with empty array
             if (pins == null || pins.Length == 0)
@@ -88,6 +96,21 @@ namespace ModernHttpClient
             }
 
             Debug.WriteLine($"Certificate pinning failure! Peer certificate chain for {hostname}: {string.Join("|", pins)}");
+            return false;
+        }
+
+        private bool MatchDomain(string hostname1, string hostname2)
+        {
+            if (hostname1.ToLower().Equals(hostname2.ToLower()))
+                return true;
+
+            if (hostname1.StartsWith("*", StringComparison.Ordinal))
+            {
+                var regex = "[\\w\\d]\\." + hostname1.Substring(1);
+
+                return Regex.IsMatch(hostname2, regex);
+            }
+
             return false;
         }
     }
