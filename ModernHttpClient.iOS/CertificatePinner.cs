@@ -106,7 +106,7 @@ namespace ModernHttpClient
 
             if (hostname1.StartsWith("*", StringComparison.Ordinal))
             {
-                var regex = "[\\w\\d]\\." + hostname1.Substring(1);
+                var regex = "[\\w\\d]*?" + hostname1.Substring(1);
 
                 return Regex.IsMatch(hostname2, regex);
             }
