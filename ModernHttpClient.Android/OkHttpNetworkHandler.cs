@@ -6,6 +6,7 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Security;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Android.OS;
@@ -51,11 +52,11 @@ namespace ModernHttpClient
             var specs = specsBuilder.Build();
 
             if (!sslVerification)
-                clientBuilder.ConnectionSpecs(new List<ConnectionSpec> {specs, ConnectionSpec.Cleartext});
+                clientBuilder.ConnectionSpecs(new List<ConnectionSpec> { specs, ConnectionSpec.Cleartext });
             else
-                clientBuilder.ConnectionSpecs(new List<ConnectionSpec> {specs});
+                clientBuilder.ConnectionSpecs(new List<ConnectionSpec> { specs });
 
-            clientBuilder.Protocols(new[] {Protocol.Http11}); // Required to avoid stream was reset: PROTOCOL_ERROR 
+            clientBuilder.Protocols(new[] { Protocol.Http11 }); // Required to avoid stream was reset: PROTOCOL_ERROR 
             if (customSSLVerification != null)
             {
                 clientBuilder.HostnameVerifier(new HostnameVerifier(customSSLVerification.Pins));
@@ -116,7 +117,7 @@ namespace ModernHttpClient
 
             if (Timeout != null)
             {
-                var timeout = (long) Timeout.Value.TotalMilliseconds;
+                var timeout = (long)Timeout.Value.TotalMilliseconds;
                 clientBuilder.ConnectTimeout(timeout, TimeUnit.Milliseconds);
                 clientBuilder.WriteTimeout(timeout, TimeUnit.Milliseconds);
                 clientBuilder.ReadTimeout(timeout, TimeUnit.Milliseconds);
@@ -199,7 +200,7 @@ namespace ModernHttpClient
 
             cancellationToken.ThrowIfCancellationRequested();
 
-            var ret = new HttpResponseMessage((HttpStatusCode) resp.Code());
+            var ret = new HttpResponseMessage((HttpStatusCode)resp.Code());
             ret.RequestMessage = request;
             ret.ReasonPhrase = resp.Message();
 
@@ -208,7 +209,7 @@ namespace ModernHttpClient
             {
                 try
                 {
-                    ret.ReasonPhrase = ((ReasonPhrases) resp.Code()).ToString().Replace('_', ' ');
+                    ret.ReasonPhrase = ((ReasonPhrases)resp.Code()).ToString().Replace('_', ' ');
                 }
 #pragma warning disable 0168
                 catch (Exception ex)
@@ -220,7 +221,7 @@ namespace ModernHttpClient
 
             if (respBody != null)
             {
-                var content = new ProgressStreamContent(respBody.ByteStream(), CancellationToken.None) {Progress = GetAndRemoveCallbackFromRegister(request)};
+                var content = new ProgressStreamContent(respBody.ByteStream(), CancellationToken.None) { Progress = GetAndRemoveCallbackFromRegister(request) };
                 ret.Content = content;
             }
             else
@@ -401,7 +402,7 @@ namespace ModernHttpClient
                 goto sslErrorVerify;
             }*/
 
-            if (_pins.FirstOrDefault(pin => pin.Hostname == hostname) == null)
+            if (_pins.FirstOrDefault(pin => MatchDomain(pin.Hostname, hostname)) == null)
             {
                 errors = SslPolicyErrors.RemoteCertificateNameMismatch;
                 PinningFailureMessage = FailureMessages.NoPinsProvided + " " + hostname;
@@ -409,6 +410,20 @@ namespace ModernHttpClient
 
             //sslErrorVerify:
             return errors == SslPolicyErrors.None;
+        }
+        private bool MatchDomain(string hostname1, string hostname2)
+        {
+            if (hostname1.ToLower().Equals(hostname2.ToLower()))
+                return true;
+
+            if (hostname1.StartsWith("*", StringComparison.Ordinal))
+            {
+                var regex = "[\\w\\d]*?" + hostname1.Substring(1);
+
+                return Regex.IsMatch(hostname2, regex);
+            }
+
+            return false;
         }
     }
 }
