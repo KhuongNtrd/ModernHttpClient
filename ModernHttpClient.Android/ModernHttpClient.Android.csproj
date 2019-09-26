@@ -76,6 +76,11 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="Square.OkHttp3">
+      <Version>3.8.1</Version>
+    </PackageReference>
+  </ItemGroup>
+  <ItemGroup>
     <None Include="Resources\AboutResources.txt" />
   </ItemGroup>
   <ItemGroup>
