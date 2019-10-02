@@ -72,7 +72,7 @@ namespace ModernHttpClient
             if (!TLSConfig.DangerousAcceptAnyServerCertificateValidator &&
                 TLSConfig.Pins != null &&
                 TLSConfig.Pins.Count > 0 &&
-                TLSConfig.Pins.FirstOrDefault(p => p.PublicKeys.Count() > 0) != null)
+                TLSConfig.Pins.FirstOrDefault(p => p.PublicKeys.Any()) != null)
             {
                 this.PinningMode = "PublicKeysOnly";
 
