@@ -1,20 +1,20 @@
 using System;
-using System.Net.Http;
-using System.Threading.Tasks;
-using System.Threading;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using Foundation;
 using ModernHttpClient.CoreFoundation;
 using ModernHttpClient.Foundation;
-
-using Foundation;
+using ObjCRuntime;
 using Security;
-using System.Text;
 
 namespace ModernHttpClient
 {
@@ -46,45 +46,114 @@ namespace ModernHttpClient
         readonly bool throwOnCaptiveNetwork;
 
         public bool DisableCaching { get; set; }
+
         public TimeSpan? Timeout { get; set; }
 
-        private readonly CertificatePinner CertificatePinner;
+        public readonly CertificatePinner CertificatePinner;
 
         private NSUrlCredential UrlCredential;
 
-        public NativeMessageHandler(bool throwOnCaptiveNetwork, bool sslVerification, CustomSSLVerification customSSLVerification = null, NativeCookieHandler cookieHandler = null): base()
+        public readonly TLSConfig TLSConfig;
+
+        public readonly string PinningMode = "CertificateOnly";
+
+        public NativeMessageHandler() : this(false, new TLSConfig()) { }
+
+        public NativeMessageHandler(bool throwOnCaptiveNetwork, TLSConfig tLSConfig, NativeCookieHandler cookieHandler = null, IWebProxy proxy = null)
         {
             this.throwOnCaptiveNetwork = throwOnCaptiveNetwork;
 
             var configuration = NSUrlSessionConfiguration.DefaultSessionConfiguration;
+
+            this.TLSConfig = tLSConfig;
 
             // System.Net.ServicePointManager.SecurityProtocol provides a mechanism for specifying supported protocol types
             // for System.Net. Since iOS only provides an API for a minimum and maximum protocol we are not able to port
             // this configuration directly and instead use the specified minimum value when one is specified.
             configuration.TLSMinimumSupportedProtocol = SslProtocol.Tls_1_2;
 
-            this.CertificatePinner = new CertificatePinner();
-
-            if(customSSLVerification != null)
+            if (!TLSConfig.DangerousAcceptAnyServerCertificateValidator &&
+                TLSConfig.Pins != null &&
+                TLSConfig.Pins.Count > 0 &&
+                TLSConfig.Pins.FirstOrDefault(p => p.PublicKeys.Count() > 0) != null)
             {
-                foreach (var pin in customSSLVerification.Pins)
+                this.PinningMode = "PublicKeysOnly";
+
+                this.CertificatePinner = new CertificatePinner();
+
+                foreach (var pin in TLSConfig.Pins)
                 {
                     this.CertificatePinner.AddPins(pin.Hostname, pin.PublicKeys);
                 }
-
-                SetClientCertificate(customSSLVerification.ClientCertificate);
             }
-                    
+
+            SetClientCertificate(TLSConfig.ClientCertificate);
+
+            // NSUrlSessionConfiguration.DefaultSessionConfiguration uses the default NSHttpCookieStorage.SharedStorage
+
+            // PR: Proxy has been supported on iOS #19
+            if (proxy != null && proxy is WebProxy)
+            {
+                var webProxy = proxy as WebProxy;
+
+                NSObject[] values =
+                {
+                    NSObject.FromObject(webProxy.Address.Host),
+                    NSNumber.FromInt32 (webProxy.Address.Port),
+                    NSNumber.FromInt32 (1)
+                };
+
+                NSObject[] keys =
+                {
+                    NSObject.FromObject("HTTPSProxy"),
+                    NSObject.FromObject("HTTPSPort"),
+                    NSObject.FromObject("HTTPSEnable")
+                };
+
+                var proxyDict = NSDictionary.FromObjectsAndKeys(values, keys);
+                configuration.ConnectionProxyDictionary = proxyDict;
+
+                if (webProxy.Credentials != null)
+                {
+                    var credentials = (NetworkCredential)webProxy.Credentials;
+
+                    var authData = string.Format("{0}:{1}", credentials.UserName, credentials.Password);
+                    var authHeaderValue = Convert.ToBase64String(Encoding.UTF8.GetBytes(authData));
+
+                    NSObject[] hValues =
+                    {
+                        NSObject.FromObject(authHeaderValue)
+                    };
+
+                    NSObject[] hKeys =
+                    {
+                        NSObject.FromObject("Proxy-Authorization")
+                    };
+
+                    var headers = NSDictionary.FromObjectsAndKeys(hValues, hKeys);
+
+                    configuration.HttpAdditionalHeaders = headers;
+                }
+            }
+
             var urlSessionDelegate = new DataTaskDelegate(this);
             session = NSUrlSession.FromConfiguration(configuration, (INSUrlSessionDelegate)urlSessionDelegate, null);
-            // NSUrlSessionConfiguration.DefaultSessionConfiguration uses the default NSHttpCookieStorage.SharedStorage
         }
 
         private void SetClientCertificate(ClientCertificate certificate)
         {
             if (certificate == null) return;
 
-            var bytes = Convert.FromBase64String(certificate.RawData);
+            byte[] bytes;
+
+            try
+            {
+                bytes = Convert.FromBase64String(certificate.RawData);
+            }
+            catch (Exception ex)
+            {
+                throw new HttpRequestException(FailureMessages.InvalidRawData, ex);
+            }
 
             var options = NSDictionary.FromObjectsAndKeys(new object[] { certificate.Passphrase }, new object[] { "passphrase" });
             var status = SecImportExport.ImportPkcs12(bytes, options, out NSDictionary[] items);
@@ -147,6 +216,7 @@ namespace ModernHttpClient
 
             var cookies = NSHttpCookieStorage.SharedStorage.Cookies
                                              .Where(c => c.Domain == request.RequestUri.Host)
+                                             .Where(c => Utility.PathMatches(request.RequestUri.AbsolutePath, c.Path))
                                              .ToList();
             foreach (var cookie in cookies)
             {
@@ -184,7 +254,7 @@ namespace ModernHttpClient
             }
 
             if (Timeout != null)
-                rq.TimeoutInterval = Timeout.Value.Seconds;
+                rq.TimeoutInterval = Timeout.Value.TotalSeconds;
 
             var op = session.CreateDataTask(rq);
 
@@ -209,13 +279,15 @@ namespace ModernHttpClient
             return await ret.Task.ConfigureAwait(false);
         }
 
+        // TODO: add INSUrlSessionTaskDelegate interface
+
         class DataTaskDelegate : NSUrlSessionDataDelegate, INSUrlSessionDelegate
         {
-            NativeMessageHandler This { get; set; }
+            NativeMessageHandler nativeHandler { get; set; }
 
-            public DataTaskDelegate(NativeMessageHandler that)
+            public DataTaskDelegate(NativeMessageHandler handler)
             {
-                this.This = that;
+                this.nativeHandler = handler;
             }
 
             public override void DidReceiveResponse(NSUrlSession session, NSUrlSessionDataTask dataTask, NSUrlResponse response, Action<NSUrlSessionResponseDisposition> completionHandler)
@@ -232,7 +304,7 @@ namespace ModernHttpClient
                     var resp = (NSHttpUrlResponse)response;
                     var req = data.Request;
 
-                    if (This.throwOnCaptiveNetwork && req.RequestUri.Host != resp.Url.Host)
+                    if (nativeHandler.throwOnCaptiveNetwork && req.RequestUri.Host != resp.Url.Host)
                     {
                         throw new CaptiveNetworkException(req.RequestUri, new Uri(resp.Url.ToString()));
                     }
@@ -283,7 +355,7 @@ namespace ModernHttpClient
             public override void WillCacheResponse(NSUrlSession session, NSUrlSessionDataTask dataTask,
                 NSCachedUrlResponse proposedResponse, Action<NSCachedUrlResponse> completionHandler)
             {
-                completionHandler(This.DisableCaching ? null : proposedResponse);
+                completionHandler(nativeHandler.DisableCaching ? null : proposedResponse);
             }
 
             public override void DidCompleteWithError(NSUrlSession session, NSUrlSessionTask task, NSError error)
@@ -293,7 +365,7 @@ namespace ModernHttpClient
 
                 if (error != null)
                 {
-                    var ex = createExceptionForNSError(error);
+                    var ex = CreateExceptionForNSError(error);
 
                     // Pass the exception to the response
                     data.FutureResponse.TrySetException(ex);
@@ -303,9 +375,9 @@ namespace ModernHttpClient
 
                 data.ResponseBody.Complete();
 
-                lock (This.inflightRequests)
+                lock (nativeHandler.inflightRequests)
                 {
-                    This.inflightRequests.Remove(task);
+                    nativeHandler.inflightRequests.Remove(task);
                 }
             }
 
@@ -323,9 +395,9 @@ namespace ModernHttpClient
 
             InflightOperation getResponseForTask(NSUrlSessionTask task)
             {
-                lock (This.inflightRequests)
+                lock (nativeHandler.inflightRequests)
                 {
-                    return This.inflightRequests[task];
+                    return nativeHandler.inflightRequests[task];
                 }
             }
 
@@ -333,20 +405,22 @@ namespace ModernHttpClient
 
             public override void DidReceiveChallenge(NSUrlSession session, NSUrlSessionTask task, NSUrlAuthenticationChallenge challenge, Action<NSUrlSessionAuthChallengeDisposition, NSUrlCredential> completionHandler)
             {
+                // TODO: add NSUrlProtectionSpace.HTTPSProxy case
+
                 if (challenge.ProtectionSpace.AuthenticationMethod == NSUrlProtectionSpace.AuthenticationMethodNTLM)
                 {
                     NetworkCredential credentialsToUse;
 
-                    if (This.Credentials != null)
+                    if (nativeHandler.Credentials != null)
                     {
-                        if (This.Credentials is NetworkCredential)
+                        if (nativeHandler.Credentials is NetworkCredential)
                         {
-                            credentialsToUse = (NetworkCredential)This.Credentials;
+                            credentialsToUse = (NetworkCredential)nativeHandler.Credentials;
                         }
                         else
                         {
                             var uri = this.getResponseForTask(task).Request.RequestUri;
-                            credentialsToUse = This.Credentials.GetCredential(uri, "NTLM");
+                            credentialsToUse = nativeHandler.Credentials.GetCredential(uri, "NTLM");
                         }
                         var credential = new NSUrlCredential(credentialsToUse.UserName, credentialsToUse.Password, NSUrlCredentialPersistence.ForSession);
                         completionHandler(NSUrlSessionAuthChallengeDisposition.UseCredential, credential);
@@ -356,84 +430,96 @@ namespace ModernHttpClient
 
                 if (challenge.ProtectionSpace.AuthenticationMethod == NSUrlProtectionSpace.AuthenticationMethodServerTrust)
                 {
-                    var serverCertChain = challenge.ProtectionSpace.ServerSecTrust;
-                    X509Certificate2 root = null;
                     var errors = SslPolicyErrors.None;
 
-                    var netCerts = Enumerable.Range(0, serverCertChain.Count)
-                        .Select(x => serverCertChain[x].ToX509Certificate2())
-                        .ToArray();
-
-                    root = netCerts[0];
-
-                    // Convert java certificates to .NET certificates and build cert chain from root certificate
-                    /*var serverCertChain = challenge.ProtectionSpace.ServerSecTrust;
-                    var chain = new X509Chain();
-                    X509Certificate2 root = null;
-                    var errors = SslPolicyErrors.None;
-
-                    // Build certificate chain and check for errors
-                    if (serverCertChain == null || serverCertChain.Count == 0)
-                    {//no cert at all
-                        errors = SslPolicyErrors.RemoteCertificateNotAvailable;
-                        PinningFailureMessage = FailureMessages.NoCertAtAll;
-                        goto sslErrorVerify;
-                    }
-
-                    if (serverCertChain.Count == 1)
-                    {//no root?
-                        errors = SslPolicyErrors.RemoteCertificateChainErrors;
-                        PinningFailureMessage = FailureMessages.NoRoot;
-                        goto sslErrorVerify;
-                    }
-
-                    var netCerts = Enumerable.Range(0, serverCertChain.Count)
-                        .Select(x => serverCertChain[x].ToX509Certificate2())
-                        .ToArray();
-
-                    for (int i = 1; i < netCerts.Length; i++)
+                    if (nativeHandler.TLSConfig.DangerousAcceptAnyServerCertificateValidator)
                     {
-                        chain.ChainPolicy.ExtraStore.Add(netCerts[i]);
-                    }
-
-                    root = netCerts[0];
-
-                    chain.ChainPolicy.RevocationFlag = X509RevocationFlag.EntireChain;
-                    chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-                    chain.ChainPolicy.UrlRetrievalTimeout = new TimeSpan(0, 1, 0);
-                    chain.ChainPolicy.VerificationFlags = X509VerificationFlags.AllowUnknownCertificateAuthority;
-
-                    if (!chain.Build(root))
-                    {
-                        errors = SslPolicyErrors.RemoteCertificateChainErrors;
-                        PinningFailureMessage = FailureMessages.ChainError;
                         goto sslErrorVerify;
                     }
-
-                    var subject = root.Subject;
-                    var subjectCn = cnRegex.Match(subject).Groups[1].Value;
-
-                    if (string.IsNullOrWhiteSpace(subjectCn) || !Utility.MatchHostnameToPattern(task.CurrentRequest.Url.Host, subjectCn))
-                    {
-                        errors = SslPolicyErrors.RemoteCertificateNameMismatch;
-                        PinningFailureMessage = FailureMessages.SubjectNameMismatch;
-                        goto sslErrorVerify;
-                    }*/
 
                     var hostname = task.CurrentRequest.Url.Host;
 
-                    if (!This.CertificatePinner.HasPins(hostname))
-                    {
-                        errors = SslPolicyErrors.RemoteCertificateNameMismatch;
-                        PinningFailureMessage = FailureMessages.NoPinsProvided + " " + hostname;
-                        goto sslErrorVerify;
-                    }
+                    // Convert java certificates to .NET certificates and build cert chain from root certificate
+                    var serverCertChain = challenge.ProtectionSpace.ServerSecTrust;
 
-                    var match = This.CertificatePinner.Check(hostname, root.RawData);
-                    if (!match)
+                    var netCerts = Enumerable.Range(0, serverCertChain.Count)
+                                .Select(x => serverCertChain[x].ToX509Certificate2())
+                                .ToList();
+
+                    switch (nativeHandler.PinningMode)
                     {
-                        errors = SslPolicyErrors.RemoteCertificateNameMismatch;
-                        PinningFailureMessage = FailureMessages.PinMismatch;
+                        case "CertificateOnly":
+
+                            var chain = new X509Chain();
+                            X509Certificate2 root = null;
+
+                            // Build certificate chain and check for errors
+                            if (serverCertChain == null || serverCertChain.Count == 0)
+                            {//no cert at all
+                                errors = SslPolicyErrors.RemoteCertificateNotAvailable;
+                                PinningFailureMessage = FailureMessages.NoCertAtAll;
+                                goto sslErrorVerify;
+                            }
+
+                            if (serverCertChain.Count == 1)
+                            {//no root?
+                                errors = SslPolicyErrors.RemoteCertificateChainErrors;
+                                PinningFailureMessage = FailureMessages.NoRoot;
+                                goto sslErrorVerify;
+                            }
+
+                            for (int i = 1; i < netCerts.Count; i++)
+                            {
+                                chain.ChainPolicy.ExtraStore.Add(netCerts[i]);
+                            }
+
+                            chain.ChainPolicy.RevocationFlag = X509RevocationFlag.EntireChain;
+                            chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+                            chain.ChainPolicy.UrlRetrievalTimeout = new TimeSpan(0, 1, 0);
+                            chain.ChainPolicy.VerificationFlags = X509VerificationFlags.AllowUnknownCertificateAuthority;
+
+                            root = netCerts[0];
+
+                            if (!chain.Build(root))
+                            {
+                                errors = SslPolicyErrors.RemoteCertificateChainErrors;
+                                PinningFailureMessage = FailureMessages.ChainError;
+                                goto sslErrorVerify;
+                            }
+
+                            var subject = root.Subject;
+                            var subjectCn = cnRegex.Match(subject).Groups[1].Value;
+
+                            if (string.IsNullOrWhiteSpace(subjectCn) || !Utility.MatchHostnameToPattern(hostname, subjectCn))
+                            {
+                                var subjectAn = root.ParseSubjectAlternativeName();
+
+                                if (subjectAn.FirstOrDefault(s => Utility.MatchHostnameToPattern(hostname, s)) == null)
+                                {
+                                    errors = SslPolicyErrors.RemoteCertificateNameMismatch;
+                                    PinningFailureMessage = FailureMessages.SubjectNameMismatch;
+                                    goto sslErrorVerify;
+                                }
+                            }
+                            break;
+                        case "PublicKeysOnly":
+
+                            if (nativeHandler.CertificatePinner != null)
+                            {
+                                if (!nativeHandler.CertificatePinner.HasPins(hostname))
+                                {
+                                    errors = SslPolicyErrors.RemoteCertificateNameMismatch;
+                                    PinningFailureMessage = FailureMessages.NoPinsProvided + " " + hostname;
+                                    goto sslErrorVerify;
+                                }
+
+                                if (!nativeHandler.CertificatePinner.Check(hostname, netCerts))
+                                {
+                                    errors = SslPolicyErrors.RemoteCertificateNameMismatch;
+                                    PinningFailureMessage = FailureMessages.PinMismatch;
+                                }
+                            }
+                            break;
                     }
 
                 sslErrorVerify:
@@ -450,7 +536,7 @@ namespace ModernHttpClient
 
                 if (challenge.ProtectionSpace.AuthenticationMethod == NSUrlProtectionSpace.AuthenticationMethodClientCertificate)
                 {
-                    completionHandler(NSUrlSessionAuthChallengeDisposition.UseCredential, This.UrlCredential);
+                    completionHandler(NSUrlSessionAuthChallengeDisposition.UseCredential, nativeHandler.UrlCredential);
 
                     return;
                 }
@@ -462,11 +548,11 @@ namespace ModernHttpClient
 
             public override void WillPerformHttpRedirection(NSUrlSession session, NSUrlSessionTask task, NSHttpUrlResponse response, NSUrlRequest newRequest, Action<NSUrlRequest> completionHandler)
             {
-                NSUrlRequest nextRequest = (This.AllowAutoRedirect ? newRequest : null);
+                NSUrlRequest nextRequest = (nativeHandler.AllowAutoRedirect ? newRequest : null);
                 completionHandler(nextRequest);
             }
 
-            Exception createExceptionForNSError(NSError error)
+            Exception CreateExceptionForNSError(NSError error)
             {
                 var ret = default(Exception);
                 var webExceptionStatus = WebExceptionStatus.UnknownError;
